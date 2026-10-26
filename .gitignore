@@ -1,0 +1,5 @@
+build/resources/
+build/bin/
+build/dist/
+node_modules/
+*.log

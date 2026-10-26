@@ -1,59 +1,73 @@
-# Classical Cipher Lab (KriptoLab)
+# KriptoLab — Classic Cipher Tool
 
-Klasik şifreleme tekniklerini tarayıcıda deneyimleyen etkileşimli bir web uygulaması. Her teknik için metni **şifreleyebilir** ya da **çözebilir**, işlemin nasıl yapıldığını adım adım görselleştirmelerle inceleyebilirsiniz.
+An interactive tool that encrypts and decrypts messages with classical ciphers and visualises every step of the algorithms. Built for the *Lecture 2 – Classical Encryption Techniques* bonus assignment.
 
-> *Lecture 2 – Classical Encryption Techniques* dersi kapsamında hazırlanmıştır.
+**Required ciphers:** Caesar · Hill · Base64 · XOR · Vigenère · Transposition · Playfair
+**Extra:** Monoalphabetic substitution, letter-frequency analysis, Turkish / English interface
 
-## Teknikler
+## Running
 
-| # | Teknik | Tür | Görselleştirme |
-|---|--------|-----|----------------|
-| 1 | Caesar | Monoalfabetik yer değiştirme | Şifre çarkı, alfabe eşlemesi, 25 anahtarla kaba kuvvet saldırısı |
-| 2 | Monoalfabetik | Rastgele permütasyon | Anahtar alfabe eşlemesi (anahtar kelimeden / rastgele üretim) |
-| 3 | Playfair | Çok harfli (digram) | 5×5 matris, ikili bazında uygulanan kural |
-| 4 | Hill | Lineer cebir (mod 26) | K ve K⁻¹ matrisleri, blok blok matris çarpımı (2×2 / 3×3) |
-| 5 | Vigenère | Polialfabetik | Girdi – anahtar – kaydırma – çıktı hizalaması |
-| 6 | Sütunlu Transpozisyon | Permütasyon | Matris ve sütun okuma sırası, çok turlu şifreleme |
-| 7 | Diferansiyel XOR | Blok zincirleme | Her blok için P ⊕ K ⊕ Cᵢ₋₁ adımları (HEX) |
-| 8 | Base64 | Kodlama | 3 bayt → 4 × 6 bit gruplaması |
+| Option | How |
+|---|---|
+| Windows executable | Double-click `KriptoLab.exe` (Windows 10/11, 64-bit, no installation). If SmartScreen warns about an unsigned app: *More info → Run anyway*. |
+| From source | Open `index.html` in any modern browser. |
+| Tests | `node tests/test-ciphers.js` |
 
-Her teknikte ayrıca:
-- Girdi ve çıktının **harf frekansı** grafiği (istatistiksel saldırı)
-- Ders notlarından **güvenlik notları** ve **anahtar uzayı**
-- **Ders örneğini yükle** butonu ile hazır örnekler
-- Çıktıyı girdiye taşıyıp ters işlemi yapan **yer değiştir** butonu
+## Features
 
-## Kullanım
+| # | Cipher | Visualisation |
+|---|--------|---------------|
+| 1 | Caesar | Cipher wheel, alphabet mapping, brute-force attack with all 25 keys |
+| 2 | Monoalphabetic (extra) | Key alphabet mapping; key from keyword or random |
+| 3 | Playfair | 5×5 key matrix, rule applied to each pair |
+| 4 | Hill (2×2 / 3×3) | K, K⁻¹ mod 26 and the matrix multiplication of each block |
+| 5 | Vigenère | Plaintext / key / shift / ciphertext alignment |
+| 6 | Transposition | Column matrix, reading order, 1–5 rounds |
+| 7 | XOR (simple + differential) | Byte table, or block chain Cᵢ = Pᵢ ⊕ K ⊕ Cᵢ₋₁ |
+| 8 | Base64 | 3 bytes → 4 × 6-bit groups |
 
-Kurulum gerektirmez. Depoyu indirip `index.html` dosyasını bir tarayıcıda açmanız yeterlidir.
+Every cipher also shows the formulas, the key space, the security notes from the lecture and an input-vs-output frequency chart.
+
+## Project structure
+
+```
+index.html                  entry page
+css/style.css               layout and theme (light + automatic dark mode)
+css/fonts.css, fonts/       IBM Plex fonts, bundled for offline use (SIL OFL)
+js/core.js                  shared helpers: mod, gcd, modular inverse, UTF-8/hex, error messages
+js/ciphers/caesar.js        one module per cipher — pure functions, no UI code
+js/ciphers/monoalphabetic.js
+js/ciphers/playfair.js
+js/ciphers/hill.js
+js/ciphers/vigenere.js
+js/ciphers/transposition.js
+js/ciphers/xor.js
+js/ciphers/base64.js
+js/ui/i18n.js               Turkish / English strings
+js/ui/visualizations.js     "How it works" panels
+js/app.js                   cipher registry, rendering and events
+tests/test-ciphers.js       test vectors and round-trip tests
+build/                      Neutralinojs configuration for the .exe
+```
+
+## Test vectors
+
+| Cipher | Key | Plaintext | Ciphertext |
+|---|---|---|---|
+| Caesar | k = 3 | `are you ready` | `DUH BRX UHDGB` |
+| Hill | 17 21 2 / 17 18 2 / 5 21 19 | `paymoremoney` | `RRLMWBKASPDH` |
+| Vigenère | `abracadabra` | `canyoumeetmeatmidnight…` | `CBEYQUPEFKMEBK…` |
+| Transposition | `4312567` | `attackpostponeduntiltwoam` | `TTNAAPTMTSUOAODWCOIXKNLXPETX` |
+| Playfair | `monarchy` | `instruments` | `GATLMZCLRQXA` |
+
+## Building the .exe
 
 ```bash
-git clone https://github.com/efilsaylam19/classical-cipher-lab.git
-cd classical-cipher-lab
-# index.html dosyasını tarayıcıda açın
+npm install -g @neutralinojs/neu
+# copy index.html, css/, js/, fonts/, icon.png into build/resources/
+cd build
+neu update
+neu build --embed-resources     # → dist/KriptoLab/KriptoLab-win_x64.exe
 ```
 
-## Doğrulama
-
-Algoritmalar ders notlarındaki ve standart kaynaklardaki test vektörleriyle doğrulanmıştır:
-
-- Caesar (k = 3): `are you ready` → `DUH BRX UHDGB`
-- Vigenère (anahtar `abracadabra`): `canyoumeetmeatmidnight…` → `CBEYQUPEFKMEBK…`
-- Playfair (anahtar `monarchy`): `instruments` → `GATLMZCLRQXA`
-- Hill (3×3): `paymoremoney` → `RRLMWBKASPDH`
-
-## Notlar
-
-- Klasik şifreler 26 harfli İngilizce alfabeyle çalışır; Türkçe karakterler (ç, ğ, ı, ö, ş, ü) otomatik olarak karşılıklarına dönüştürülür. XOR ve Base64 UTF-8 metni olduğu gibi işler.
-- Hill şifresinde `C = K · P mod 26` (sütun vektörü) gösterimi kullanılır; anahtar matrisin determinantı 26 ile aralarında asal olmalıdır.
-- Tüm işlemler tarayıcıda yapılır; hiçbir veri bir sunucuya gönderilmez.
-
-## Proje yapısı
-
-```
-├── index.html
-├── css/style.css
-└── js/
-    ├── ciphers.js   # Şifreleme algoritmaları (saf fonksiyonlar)
-    └── app.js       # Arayüz ve görselleştirmeler
-```
+The app runs entirely offline; no data leaves the computer.

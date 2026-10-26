@@ -1,14 +1,17 @@
 <!doctype html>
-<html lang="tr">
+<!--
+  KriptoLab — Classic Cipher Tool
+  Entry page. All logic is in /js, styles in /css. No build step:
+  open this file in a browser, or run KriptoLab.exe.
+-->
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KriptoLab · Klasik Şifreleme Teknikleri</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap" rel="stylesheet" />
+  <title>KriptoLab · Classic Cipher Tool</title>
+  <link rel="stylesheet" href="css/fonts.css" />
   <link rel="stylesheet" href="css/style.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231c1c1a'/%3E%3Cpath d='M22 30v-6a10 10 0 0 1 20 0v6' stroke='%23f6f5f1' stroke-width='4' fill='none'/%3E%3Crect x='16' y='30' width='32' height='22' rx='4' fill='%23c2522d'/%3E%3C/svg%3E" />
+  <link rel="icon" href="icon.png" />
 </head>
 <body>
   <header class="topbar">
@@ -18,16 +21,24 @@
       </div>
       <div>
         <h1>KriptoLab</h1>
-        <p class="sub">Klasik Şifreleme Teknikleri</p>
+        <p class="sub" data-i18n="appSub">Classical Encryption Techniques</p>
       </div>
     </div>
-    <div class="course">Lecture 2 · Classical Encryption Techniques</div>
+    <div class="top-right">
+      <span class="course">Lecture 2 · Classical Encryption Techniques</span>
+      <div class="lang" role="group" aria-label="Language">
+        <button class="lang-btn" data-lang="tr">TR</button>
+        <button class="lang-btn active" data-lang="en">EN</button>
+      </div>
+    </div>
   </header>
 
   <div class="layout">
-    <nav class="sidebar" id="techList" aria-label="Şifreleme teknikleri"></nav>
+    <!-- Cipher list (filled by app.js) -->
+    <nav class="sidebar" id="techList"></nav>
 
     <main class="main">
+      <!-- Name, description and formulas of the selected cipher -->
       <section class="hero" id="hero">
         <div class="hero-top">
           <span class="chip" id="techTag"></span>
@@ -38,72 +49,87 @@
         <div class="formula" id="techFormula"></div>
       </section>
 
+      <!-- Encrypt / decrypt switch and key inputs -->
       <section class="card controls">
         <div class="controls-row">
-          <div class="mode" role="tablist" aria-label="İşlem">
-            <button class="mode-btn active" data-mode="enc" role="tab">Şifrele</button>
-            <button class="mode-btn" data-mode="dec" role="tab">Çöz</button>
+          <div class="mode" role="tablist">
+            <button class="mode-btn active" data-mode="enc" role="tab" data-i18n="encrypt">Encrypt</button>
+            <button class="mode-btn" data-mode="dec" role="tab" data-i18n="decrypt">Decrypt</button>
             <i class="mode-pill"></i>
           </div>
-          <button class="ghost" id="exampleBtn" title="Ders notlarındaki örneği yükle">Ders örneğini yükle</button>
+          <button class="ghost" id="exampleBtn" data-i18n="loadExample">Load lecture example</button>
         </div>
         <div class="keys" id="keyArea"></div>
       </section>
 
+      <!-- Input and output -->
       <section class="io">
         <div class="card pane">
           <div class="pane-head">
-            <label for="input" id="inLabel">Düz metin (Plaintext)</label>
-            <span class="count" id="inCount">0 karakter</span>
+            <label for="input" id="inLabel">Plaintext</label>
+            <span class="count" id="inCount"></span>
           </div>
-          <textarea id="input" spellcheck="false" placeholder="Metninizi buraya yazın..."></textarea>
+          <textarea id="input" spellcheck="false" data-i18n-ph="placeholder"></textarea>
           <div class="pane-foot">
-            <button class="ghost sm" id="clearBtn">Temizle</button>
+            <button class="ghost sm" id="clearBtn" data-i18n="clear">Clear</button>
           </div>
         </div>
 
-        <button class="swap" id="swapBtn" title="Çıktıyı girdiye taşı ve işlemi tersine çevir" aria-label="Yer değiştir">
+        <button class="swap" id="swapBtn" data-i18n-title="swapTitle" aria-label="Swap">
           <svg viewBox="0 0 24 24"><path d="M5 8h13l-3.5-3.5M19 16H6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
 
         <div class="card pane out">
           <div class="pane-head">
-            <label id="outLabel">Şifreli metin (Ciphertext)</label>
-            <span class="count" id="outCount">0 karakter</span>
+            <label id="outLabel">Ciphertext</label>
+            <span class="count" id="outCount"></span>
           </div>
-          <div id="output" class="output" aria-live="polite"></div>
+          <div id="output" class="output" aria-live="polite" data-i18n-empty="outputEmpty"></div>
           <div class="error" id="error" hidden></div>
           <div class="pane-foot">
-            <button class="primary sm" id="copyBtn">Kopyala</button>
+            <button class="primary sm" id="copyBtn" data-i18n="copy">Copy</button>
           </div>
         </div>
       </section>
 
+      <!-- Step-by-step visualisation -->
       <section class="card viz">
-        <div class="section-title">Nasıl çalışıyor? <small>Adım adım gösterim</small></div>
+        <div class="section-title"><span data-i18n="howItWorks">How it works</span> <small data-i18n="stepByStep">Step-by-step view</small></div>
         <div id="viz"></div>
       </section>
 
       <section class="grid2">
         <div class="card freq">
-          <div class="section-title">Harf frekansı <small>Girdi ve çıktı · istatistiksel saldırı</small></div>
-          <div class="legend"><span><i class="lg in"></i>Girdi</span><span><i class="lg out"></i>Çıktı</span></div>
+          <div class="section-title"><span data-i18n="freqTitle">Letter frequency</span> <small data-i18n="freqSub"></small></div>
+          <div class="legend"><span><i class="lg in"></i><span data-i18n="input">Input</span></span><span><i class="lg out"></i><span data-i18n="output">Output</span></span></div>
           <div id="freqChart" class="freq-chart"></div>
         </div>
         <div class="card sec">
-          <div class="section-title">Güvenlik notları <small>Ders notlarından</small></div>
+          <div class="section-title"><span data-i18n="secTitle">Security notes</span> <small data-i18n="secSub"></small></div>
           <ul id="techSec" class="sec-list"></ul>
           <div class="keyspace" id="keyspace"></div>
         </div>
       </section>
 
-      <footer class="foot">KriptoLab · Tüm işlemler tarayıcınızda yapılır; veri hiçbir yere gönderilmez.</footer>
+      <footer class="foot" data-i18n="footer"></footer>
     </main>
   </div>
 
   <div class="toast" id="toast"></div>
 
-  <script src="js/ciphers.js"></script>
+  <!-- 1) cipher core + one module per cipher -->
+  <script src="js/core.js"></script>
+  <script src="js/ciphers/caesar.js"></script>
+  <script src="js/ciphers/monoalphabetic.js"></script>
+  <script src="js/ciphers/playfair.js"></script>
+  <script src="js/ciphers/hill.js"></script>
+  <script src="js/ciphers/vigenere.js"></script>
+  <script src="js/ciphers/transposition.js"></script>
+  <script src="js/ciphers/xor.js"></script>
+  <script src="js/ciphers/base64.js"></script>
+  <!-- 2) user interface -->
+  <script src="js/ui/i18n.js"></script>
+  <script src="js/ui/visualizations.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

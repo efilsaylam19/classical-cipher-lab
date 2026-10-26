@@ -1,416 +1,410 @@
-/* =========================================================
-   KriptoLab — Arayüz
-   ========================================================= */
+/**
+ * =============================================================
+ *  KriptoLab — app.js
+ *  User-interface controller.
+ *
+ *  Structure
+ *   1. TECHS      – registry: one entry per cipher with its texts
+ *                   (TR/EN), key controls, example and run() function
+ *   2. Rendering  – sidebar, cipher header, key controls, output,
+ *                   frequency chart
+ *   3. Events     – mode switch, typing, key changes, swap, copy …
+ *
+ *  The cipher maths lives in js/ciphers/*.js and the panel drawings
+ *  in js/ui/visualizations.js; this file only wires them together.
+ * =============================================================
+ */
 (function () {
   'use strict';
+
   const C = window.Ciphers;
-  const A = C.A;
+  const V = window.Viz;
+  const I = window.I18N;
+  const A = C.ALPHABET;
   const $ = (s, r = document) => r.querySelector(s);
-  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const t = (tr, en) => I.t(tr, en);
+  const esc = V.esc;
 
-  // Türkçe harfleri 26 harfli alfabeye indir (klasik şifreler İngilizce alfabe kullanır)
-  const TR = { 'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ş': 's', 'Ş': 'S', 'ü': 'u', 'Ü': 'U', 'â': 'a', 'Â': 'A', 'î': 'i', 'û': 'u' };
-  const trNorm = (s) => s.replace(/[çÇğĞıİöÖşŞüÜâÂîû]/g, (c) => TR[c]);
+  /**
+   * Classical ciphers use the 26-letter English alphabet, so Turkish
+   * letters are mapped to their closest Latin letter before processing.
+   */
+  const TR_MAP = { 'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ş': 's', 'Ş': 'S', 'ü': 'u', 'Ü': 'U', 'â': 'a', 'Â': 'A', 'î': 'i', 'û': 'u' };
+  const trNorm = (s) => s.replace(/[çÇğĞıİöÖşŞüÜâÂîû]/g, (c) => TR_MAP[c]);
 
-  const state = { tech: 'caesar', mode: 'enc', keys: {}, sel: 0 };
+  /** Application state */
+  const state = {
+    tech: 'caesar',   // selected cipher id
+    mode: 'enc',      // 'enc' | 'dec'
+    keys: {},         // current key settings per cipher
+    sel: 0,           // selected pair/block in the visualisation
+  };
 
-  /* ---------------- Teknik tanımları ---------------- */
+  const DEFAULT_HILL_3 = [[17, 21, 2], [17, 18, 2], [5, 21, 19]];
+  const DEFAULT_HILL_2 = [[3, 3], [2, 5]];
+  const MONO_EXAMPLE = C.monoKeyFromKeyword('thijab');
+
+  /* =============================================================
+   *  1. CIPHER REGISTRY
+   * =========================================================== */
+  const GROUPS = {
+    sub: { tr: 'Yer değiştirme', en: 'Substitution' },
+    poly: { tr: 'Çok harfli', en: 'Polygraphic' },
+    polyalpha: { tr: 'Çok alfabeli', en: 'Polyalphabetic' },
+    trans: { tr: 'Yer değiştirme sırası', en: 'Transposition' },
+    modern: { tr: 'Bit düzeyinde / kodlama', en: 'Bitwise & encoding' },
+  };
+
   const TECHS = [
+    /* ----------------------------- Caesar ----------------------------- */
     {
-      id: 'caesar', group: 'Yer değiştirme (Substitution)', name: 'Caesar Şifresi', short: 'Kaydırmalı şifre', icon: 'Cæ',
-      tag: 'Monoalfabetik · Substitution',
-      desc: 'Bilinen en eski yer değiştirme şifresi. Her harf, alfabede <b>k</b> konum ilerideki harfle değiştirilir. Orijinal Caesar şifresinde k = 3’tür.',
+      id: 'caesar', group: 'sub', icon: 'Cæ',
+      name: { tr: 'Caesar Şifresi', en: 'Caesar Cipher' },
+      short: { tr: 'Kaydırmalı şifre', en: 'Shift cipher' },
+      tag: { tr: 'Monoalfabetik · Yer değiştirme', en: 'Monoalphabetic · Substitution' },
+      desc: {
+        tr: 'Bilinen en eski yer değiştirme şifresi. Her harf, alfabede <b>k</b> konum ilerideki harfle değiştirilir. Orijinal Caesar şifresinde k = 3’tür.',
+        en: 'The earliest known substitution cipher. Each letter is replaced by the letter <b>k</b> positions further down the alphabet. The original Caesar cipher uses k = 3.',
+      },
       formula: ['<b>C</b> = E(k, p) = (p + <em>k</em>) mod 26', '<b>P</b> = D(k, c) = (c − <em>k</em>) mod 26'],
-      security: ['Anahtar uzayı yalnızca 25 → kaba kuvvet (brute-force) saldırısıyla anında kırılır.', 'Monoalfabetik olduğu için harf frekansları aynen korunur.', 'Aşağıdaki görselleştirmede tüm 25 anahtarın denendiği saldırıyı görebilirsiniz.'],
-      keyspace: '<b>25</b> olası anahtar',
+      security: {
+        tr: ['Anahtar uzayı yalnızca 25, bu yüzden kaba kuvvet saldırısıyla anında kırılır.', 'Monoalfabetik olduğu için harf frekansları aynen korunur.', 'Görselleştirmede 25 anahtarın hepsinin denendiği saldırıyı görebilirsiniz.'],
+        en: ['The key space is only 25, so a brute-force attack breaks it instantly.', 'Being monoalphabetic, it preserves letter frequencies exactly.', 'The visualisation shows the attack that tries all 25 keys.'],
+      },
+      keyspace: { tr: '<b>25</b> olası anahtar', en: '<b>25</b> possible keys' },
       defaults: { k: 3 },
       example: { text: 'are you ready', keys: { k: 3 } },
       keysHTML: (k) => `
         <div class="field" style="flex:2">
-          <label>Kaydırma miktarı (k)</label>
+          <label>${t('Kaydırma miktarı (k)', 'Shift (k)')}</label>
           <input type="range" min="0" max="25" value="${k.k}" data-key="k" />
         </div>
         <div class="shift-val" id="shiftVal">${k.k}</div>`,
       run(text, dec, k) {
-        const r = C.caesar(trNorm(text), k.k, dec);
-        return { result: r, viz: vizCaesar(text, k.k, dec) };
+        const result = C.caesar(trNorm(text), k.k, dec);
+        return { result, viz: V.caesar({ letters: C.onlyLetters(trNorm(text)), k: +k.k, dec }) };
       },
       freq: true,
     },
+
+    /* -------------------------- Monoalphabetic ------------------------- */
     {
-      id: 'mono', group: 'Yer değiştirme (Substitution)', name: 'Monoalfabetik Şifre', short: 'Rastgele permütasyon', icon: 'Mα',
-      tag: 'Monoalfabetik · Substitution',
-      desc: 'Alfabedeki 26 harfin <b>rastgele bir permütasyonu</b> anahtar olarak kullanılır. Her düz metin harfi her zaman aynı şifreli harfe eşlenir.',
-      formula: ['a b c d e f … → <em>t h i j a b</em> …', 'Anahtar = 26 harfin permütasyonu'],
-      security: ['Anahtar uzayı 26! ≈ 4 × 10²⁶ — DES’in 2⁵⁶ ≈ 7.2 × 10¹⁶ anahtar uzayından bile büyük.', 'Ama yine de kırılabilir! Harf, digram (th, he, an…) ve trigram (the, and, ent…) frekansları korunduğu için istatistiksel saldırıya açıktır.', 'Frekans grafiğinde girdi ve çıktının aynı “şekle” sahip olduğuna dikkat edin.'],
-      keyspace: '<b>26! ≈ 4 × 10²⁶</b> olası anahtar',
-      defaults: { key: C.monoKeyFromKeyword('thijab'), word: 'thijab' },
-      example: { text: 'attack at dawn, the enemy is near', keys: { key: C.monoKeyFromKeyword('thijab'), word: 'thijab' } },
+      id: 'mono', group: 'sub', icon: 'Mα', extra: true,
+      name: { tr: 'Monoalfabetik Şifre', en: 'Monoalphabetic Cipher' },
+      short: { tr: 'Ek · rastgele permütasyon', en: 'Extra · random permutation' },
+      tag: { tr: 'Monoalfabetik · Yer değiştirme', en: 'Monoalphabetic · Substitution' },
+      desc: {
+        tr: 'Alfabedeki 26 harfin <b>rastgele bir permütasyonu</b> anahtar olarak kullanılır. Her düz metin harfi her zaman aynı şifreli harfe eşlenir.',
+        en: 'A <b>random permutation</b> of the 26 letters is used as the key. Every plaintext letter is always mapped to the same ciphertext letter.',
+      },
+      formula: ['a b c d e f … → <em>t h i j a b</em> …', 'Key = permutation of 26 letters'],
+      security: {
+        tr: ['Anahtar uzayı 26! ≈ 4 × 10²⁶, DES’in 2⁵⁶ ≈ 7.2 × 10¹⁶ anahtar uzayından bile büyük.', 'Yine de kırılabilir: harf, digram ve trigram frekansları korunduğu için istatistiksel saldırıya açıktır.', 'Frekans grafiğinde girdi ve çıktının aynı “şekle” sahip olduğuna dikkat edin.'],
+        en: ['The key space is 26! ≈ 4 × 10²⁶, even larger than DES (2⁵⁶ ≈ 7.2 × 10¹⁶).', 'It is still breakable: letter, digram and trigram frequencies survive, so a statistical attack works.', 'Notice that input and output have the same “shape” in the frequency chart.'],
+      },
+      keyspace: { tr: '<b>26! ≈ 4 × 10²⁶</b> olası anahtar', en: '<b>26! ≈ 4 × 10²⁶</b> possible keys' },
+      defaults: { key: MONO_EXAMPLE, word: 'thijab' },
+      example: { text: 'attack at dawn, the enemy is near', keys: { key: MONO_EXAMPLE, word: 'thijab' } },
       keysHTML: (k) => {
         const err = C.validateMonoKey(k.key);
         return `
         <div class="field" style="flex:3">
-          <label>Anahtar alfabe (26 harf)</label>
+          <label>${t('Anahtar alfabe (26 harf)', 'Key alphabet (26 letters)')}</label>
           <input type="text" maxlength="26" value="${esc(k.key)}" data-key="key" style="letter-spacing:2px;text-transform:uppercase" />
-          <span class="key-status ${err ? 'bad' : 'ok'}">${err ? '✗ ' + esc(err) : '✓ Geçerli permütasyon'}</span>
+          <span class="key-status ${err ? 'bad' : 'ok'}">${err ? '✗ ' + esc(err) : '✓ ' + t('Geçerli permütasyon', 'Valid permutation')}</span>
         </div>
         <div class="field">
-          <label>Anahtar kelimeden üret</label>
-          <input type="text" value="${esc(k.word || '')}" data-key="word" placeholder="ör. kriptoloji" />
-          <span class="hint">Kelime + kalan harfler sırasıyla</span>
+          <label>${t('Anahtar kelimeden üret', 'Generate from keyword')}</label>
+          <input type="text" value="${esc(k.word || '')}" data-key="word" placeholder="${t('ör. kriptoloji', 'e.g. cryptology')}" />
+          <span class="hint">${t('Kelime + kalan harfler sırasıyla', 'Keyword + remaining letters in order')}</span>
         </div>
-        <div class="field narrow"><label>&nbsp;</label><button class="ghost" data-action="random">Rastgele</button><span class="hint">&nbsp;</span></div>`;
+        <div class="field narrow"><label>&nbsp;</label><button class="ghost" data-action="random">${t('Rastgele', 'Random')}</button><span class="hint">&nbsp;</span></div>`;
       },
       onKey(name, val, k) {
-        if (name === 'word') k.key = C.monoKeyFromKeyword(val);
-        if (name === 'key') k.key = val.toUpperCase().replace(/[^A-Z]/g, '');
+        if (name === 'word') { k.word = val; k.key = C.monoKeyFromKeyword(val); return true; }
+        if (name === 'key') { k.key = val.toUpperCase().replace(/[^A-Z]/g, ''); return true; }
+        return false;
       },
+      rerenderOn: ['key', 'word'],
       action(name, k) { if (name === 'random') { k.key = C.randomMonoKey(); k.word = ''; } },
       run(text, dec, k) {
-        const r = C.mono(trNorm(text), k.key, dec);
-        return { result: r, viz: vizMono(text, k.key, dec) };
+        const result = C.mono(trNorm(text), k.key, dec);
+        return { result, viz: V.mono({ letters: C.onlyLetters(trNorm(text)), key: k.key.toUpperCase(), dec }) };
       },
       freq: true,
     },
+
+    /* ----------------------------- Playfair ---------------------------- */
     {
-      id: 'playfair', group: 'Çok harfli (Multi-character)', name: 'Playfair Şifresi', short: '5×5 matris, ikili', icon: 'Pf',
-      tag: 'Çok harfli · Digram',
-      desc: 'Harfleri <b>ikişer ikişer</b> şifreler. Anahtar kelime ve alfabe 5×5 bir matrise yerleştirilir (I/J aynı hücreyi paylaşır). Tekrar eden harflerin arasına dolgu harfi (X) eklenir.',
-      formula: ['Aynı satır → <em>sağdaki</em> harf (dairesel)', 'Aynı sütun → <em>alttaki</em> harf (dairesel)', 'Diğer → aynı satır, <em>diğer harfin sütunu</em>'],
-      security: ['On yıllarca kırılamaz sanıldı; 1. Dünya Savaşı’nda İngiliz, 2. Dünya Savaşı’nda ABD ordusu kullandı.', 'Yine de kolayca kırılır: frekansları değiştirir ama yeterince değil.', 'Ters digramlar kriptanalize yardım eder: AB → XY ise BA → YX.'],
-      keyspace: '<b>25! ≈ 1.55 × 10²⁵</b> olası matris',
+      id: 'playfair', group: 'poly', icon: 'Pf',
+      name: { tr: 'Playfair Şifresi', en: 'Playfair Cipher' },
+      short: { tr: '5×5 matris, ikili', en: '5×5 matrix, digrams' },
+      tag: { tr: 'Çok harfli · Digram', en: 'Polygraphic · Digram' },
+      desc: {
+        tr: 'Harfleri <b>ikişer ikişer</b> şifreler. Anahtar kelime ve alfabe 5×5 bir matrise yerleştirilir (I/J aynı hücreyi paylaşır). Tekrar eden harflerin arasına dolgu harfi (X) eklenir.',
+        en: 'Encrypts letters <b>two at a time</b>. The keyword and the alphabet fill a 5×5 matrix (I/J share a cell). A filler letter (X) is inserted between repeating letters.',
+      },
+      formula: {
+        tr: ['Aynı satır → <em>sağdaki</em> harf (dairesel)', 'Aynı sütun → <em>alttaki</em> harf (dairesel)', 'Diğer → aynı satır, <em>diğer harfin sütunu</em>'],
+        en: ['Same row → letter to the <em>right</em> (circular)', 'Same column → letter <em>below</em> (circular)', 'Otherwise → same row, <em>other letter’s column</em>'],
+      },
+      security: {
+        tr: ['On yıllarca kırılamaz sanıldı; 1. Dünya Savaşı’nda İngiliz, 2. Dünya Savaşı’nda ABD ordusu kullandı.', 'Yine de kolayca kırılır: frekansları değiştirir ama yeterince değil.', 'Ters digramlar kriptanalize yardım eder: AB → XY ise BA → YX.'],
+        en: ['Thought unbreakable for decades; used by the British Army in WW1 and the U.S. Army in WW2.', 'Still easily broken: it alters frequencies, but not sufficiently.', 'Reversed digrams aid cryptanalysis: if AB → XY then BA → YX.'],
+      },
+      keyspace: { tr: '<b>25! ≈ 1.55 × 10²⁵</b> olası matris', en: '<b>25! ≈ 1.55 × 10²⁵</b> possible matrices' },
       defaults: { key: 'smythework', filler: 'X' },
       example: { text: 'meet me at midnight', keys: { key: 'smythework', filler: 'X' } },
       keysHTML: (k) => `
-        <div class="field" style="flex:3"><label>Anahtar kelime</label><input type="text" value="${esc(k.key)}" data-key="key" /></div>
-        <div class="field narrow"><label>Dolgu harfi</label><input type="text" maxlength="1" value="${esc(k.filler)}" data-key="filler" style="text-transform:uppercase" /></div>`,
+        <div class="field" style="flex:3"><label>${t('Anahtar kelime', 'Keyword')}</label><input type="text" value="${esc(k.key)}" data-key="key" /></div>
+        <div class="field narrow"><label>${t('Dolgu harfi', 'Filler letter')}</label><input type="text" maxlength="1" value="${esc(k.filler)}" data-key="filler" style="text-transform:uppercase" /></div>`,
       run(text, dec, k) {
         const r = C.playfair(trNorm(text), k.key, dec, k.filler);
-        return { result: r.result, viz: vizPlayfair(r, dec) };
+        return { result: r.result, viz: V.playfair({ r, dec, keyword: k.key, sel: state.sel }) };
       },
       freq: true,
     },
+
+    /* ------------------------------- Hill ------------------------------ */
     {
-      id: 'hill', group: 'Çok harfli (Multi-character)', name: 'Hill Şifresi', short: 'Matris çarpımı mod 26', icon: 'H',
-      tag: 'Çok harfli · Lineer cebir',
-      desc: 'Çok harfli yer değiştirmeye matematiksel yaklaşım. Harflere 0–25 arası sayılar atanır (a = 0 … z = 25) ve harfler <b>n’er n’er</b> (burada 2 veya 3) bir anahtar matrisle çarpılır.',
+      id: 'hill', group: 'poly', icon: 'H',
+      name: { tr: 'Hill Şifresi', en: 'Hill Cipher' },
+      short: { tr: 'Matris çarpımı mod 26', en: 'Matrix multiplication mod 26' },
+      tag: { tr: 'Çok harfli · Lineer cebir', en: 'Polygraphic · Linear algebra' },
+      desc: {
+        tr: 'Çok harfli yer değiştirmeye matematiksel yaklaşım. Harflere 0–25 arası sayılar atanır (a = 0 … z = 25) ve harfler <b>n’er n’er</b> (2 veya 3) bir anahtar matrisle çarpılır.',
+        en: 'A mathematical approach to multi-letter substitution. Letters become numbers 0–25 (a = 0 … z = 25) and are multiplied by a key matrix <b>n letters at a time</b> (n = 2 or 3).',
+      },
       formula: ['<b>C</b> = [<em>K</em>] · P mod 26', '<b>P</b> = [<em>K⁻¹</em>] · C mod 26'],
-      security: ['Yalnızca şifreli metin saldırısına (ciphertext-only) karşı çok güvenli — büyük anahtar uzayı.', 'Düz metin–şifreli metin çiftleri biliniyorsa güvenlik SIFIR: anahtar matris bu çiftlerden kolayca hesaplanır.', 'Anahtar matrisin mod 26’da tersi olmalı: det(K) ile 26 aralarında asal olmalı.'],
-      keyspace: '3×3 için <b>≈ 1.6 × 10¹²</b> tersinir matris',
-      defaults: { n: 3, M: [[17, 21, 2], [17, 18, 2], [5, 21, 19]] },
-      example: { text: 'paymoremoney', keys: { n: 3, M: [[17, 21, 2], [17, 18, 2], [5, 21, 19]] } },
-      keysHTML: (k) => {
-        const d = C.mod(C.det(k.M), 26);
-        const ok = C.gcd(d, 26) === 1;
-        return `
-        <div class="field narrow"><label>Matris boyutu</label>
+      security: {
+        tr: ['Yalnızca şifreli metin saldırısına karşı çok güvenli (büyük anahtar uzayı).', 'Düz metin–şifreli metin çiftleri biliniyorsa güvenlik sıfırdır: anahtar matris bu çiftlerden kolayca hesaplanır.', 'Anahtar matrisin mod 26’da tersi olmalı: det(K) ile 26 aralarında asal olmalı.'],
+        en: ['Very secure against ciphertext-only attacks (large key space).', 'Zero security when plaintext–ciphertext pairs are known: the key matrix is easily computed from them.', 'The key matrix must be invertible mod 26: det(K) must be coprime with 26.'],
+      },
+      keyspace: { tr: '3×3 için <b>≈ 1.6 × 10¹²</b> tersinir matris', en: '<b>≈ 1.6 × 10¹²</b> invertible 3×3 matrices' },
+      defaults: { n: 3, M: DEFAULT_HILL_3 },
+      example: { text: 'paymoremoney', keys: { n: 3, M: DEFAULT_HILL_3 } },
+      keysHTML: (k) => `
+        <div class="field narrow"><label>${t('Matris boyutu', 'Matrix size')}</label>
           <select data-key="n"><option value="2" ${k.n === 2 ? 'selected' : ''}>2 × 2</option><option value="3" ${k.n === 3 ? 'selected' : ''}>3 × 3</option></select>
-          <button class="ghost sm" data-action="randomHill" style="margin-top:6px">Rastgele K</button>
+          <button class="ghost sm" data-action="randomHill" style="margin-top:6px">${t('Rastgele K', 'Random K')}</button>
         </div>
-        <div class="field" style="flex:0 0 auto"><label>Anahtar matris K</label>
-          <div class="matrix-input" style="grid-template-columns:repeat(${k.n},64px)">
+        <div class="field" style="flex:0 0 auto"><label>${t('Anahtar matris K', 'Key matrix K')}</label>
+          <div class="matrix-input" style="grid-template-columns:repeat(${k.n},60px)">
             ${k.M.map((row, i) => row.map((v, j) => `<input type="number" min="0" max="25" value="${v}" data-cell="${i},${j}" />`).join('')).join('')}
           </div>
         </div>
-        <div class="field"><label>Tersinirlik</label>
-          <span class="key-status ${ok ? 'ok' : 'bad'}">det(K) mod 26 = ${d} → ${ok ? '✓ tersi var' : '✗ tersi yok (gcd ≠ 1)'}</span>
-          <span class="hint">Eksik blok sonuna X eklenir.</span>
-        </div>`;
-      },
+        <div class="field"><label>${t('Tersinirlik', 'Invertibility')}</label>
+          ${hillStatusHTML(k.M)}
+          <span class="hint">${t('Eksik blok sonuna X eklenir.', 'An incomplete last block is padded with X.')}</span>
+        </div>`,
       onKey(name, val, k) {
-        if (name === 'n') {
-          k.n = +val;
-          k.M = k.n === 2 ? [[3, 3], [2, 5]] : [[17, 21, 2], [17, 18, 2], [5, 21, 19]];
-        }
+        if (name === 'n') { k.n = +val; k.M = JSON.parse(JSON.stringify(k.n === 2 ? DEFAULT_HILL_2 : DEFAULT_HILL_3)); return true; }
+        return false;
       },
-      action(name, k) {
-        if (name === 'randomHill') {
-          let M;
-          do { M = Array.from({ length: k.n }, () => Array.from({ length: k.n }, () => Math.floor(Math.random() * 26))); }
-          while (C.gcd(C.mod(C.det(M), 26), 26) !== 1);
-          k.M = M;
-        }
-      },
+      rerenderOn: ['n'],
+      action(name, k) { if (name === 'randomHill') k.M = C.randomHillKey(k.n); },
       run(text, dec, k) {
         const r = C.hill(trNorm(text), k.M, dec);
-        return { result: r.result, viz: vizHill(r, k.M, dec) };
+        return { result: r.result, viz: V.hill({ r, K: k.M, dec, sel: state.sel }) };
       },
       freq: true,
     },
+
+    /* ----------------------------- Vigenère ---------------------------- */
     {
-      id: 'vigenere', group: 'Çok alfabeli (Polyalphabetic)', name: 'Vigenère Şifresi', short: 'Anahtar kelimeli Caesar', icon: 'V',
-      tag: 'Polialfabetik · Substitution',
-      desc: 'Yer değiştirme kuralı <b>her karakterde değişir</b>. Anahtar düz metinle hizalanır (gerekirse tekrarlanır) ve her anahtar harfi ayrı bir Caesar kaydırmasını belirtir.',
-      formula: ['<b>Cᵢ</b> = (Pᵢ + <em>Kᵢ mod m</em>) mod 26', '<b>Pᵢ</b> = (Cᵢ − <em>Kᵢ mod m</em>) mod 26'],
-      security: ['Her düz metin harfi için birden fazla şifreli harf olması frekansları maskeler.', 'Anahtar ne kadar uzunsa maskeleme o kadar iyi; ideal: düz metin kadar uzun ve tamamen rastgele anahtar.', 'Kırma yöntemi: Kasiski incelemesi — tekrar eden diziler arasındaki mesafelerden anahtar uzunluğu tahmin edilir.'],
-      keyspace: 'Anahtar uzunluğu m için <b>26ᵐ</b>',
+      id: 'vigenere', group: 'polyalpha', icon: 'V',
+      name: { tr: 'Vigenère Şifresi', en: 'Vigenère Cipher' },
+      short: { tr: 'Anahtar kelimeli Caesar', en: 'Keyword-driven Caesar' },
+      tag: { tr: 'Polialfabetik · Yer değiştirme', en: 'Polyalphabetic · Substitution' },
+      desc: {
+        tr: 'Yer değiştirme kuralı <b>her karakterde değişir</b>. Anahtar düz metinle hizalanır (gerekirse tekrarlanır) ve her anahtar harfi ayrı bir Caesar kaydırmasını belirtir.',
+        en: 'The substitution rule <b>changes with each character</b>. The key is aligned with the plaintext (repeated if necessary) and each key letter denotes a different Caesar shift.',
+      },
+      formula: ['<b>Cᵢ</b> = (Pᵢ + <em>K<sub>i mod m</sub></em>) mod 26', '<b>Pᵢ</b> = (Cᵢ − <em>K<sub>i mod m</sub></em>) mod 26'],
+      security: {
+        tr: ['Her düz metin harfi için birden fazla şifreli harf olması frekansları maskeler.', 'Anahtar uzadıkça maskeleme iyileşir; ideal olan düz metin kadar uzun ve tamamen rastgele bir anahtardır.', 'Kırma yöntemi: Kasiski incelemesi. Tekrar eden diziler arasındaki mesafelerden anahtar uzunluğu tahmin edilir.'],
+        en: ['Multiple ciphertext letters for each plaintext letter mask the frequencies.', 'A longer key masks better; ideally the key is as long as the plaintext and purely random.', 'Breaking method: Kasiski examination — distances between repeated sequences reveal the key length.'],
+      },
+      keyspace: { tr: 'Anahtar uzunluğu m için <b>26<sup>m</sup></b>', en: '<b>26<sup>m</sup></b> for a key of length m' },
       defaults: { key: 'abracadabra' },
       example: { text: 'canyoumeetmeatmidnightihavethegoods', keys: { key: 'abracadabra' } },
-      keysHTML: (k) => `<div class="field"><label>Anahtar kelime</label><input type="text" value="${esc(k.key)}" data-key="key" /><span class="hint">Yalnızca A–Z harfleri kullanılır; harf olmayan karakterler korunur.</span></div>`,
+      keysHTML: (k) => `<div class="field"><label>${t('Anahtar kelime', 'Keyword')}</label><input type="text" value="${esc(k.key)}" data-key="key" />
+        <span class="hint">${t('Yalnızca A–Z harfleri kullanılır; harf olmayan karakterler korunur.', 'Only the letters A–Z are used; non-letters are kept as they are.')}</span></div>`,
       run(text, dec, k) {
         const r = C.vigenere(trNorm(text), k.key, dec);
-        return { result: r.result, viz: vizVigenere(r.align) };
+        return { result: r.result, viz: V.vigenere({ align: r.align }) };
       },
       freq: true,
     },
+
+    /* --------------------------- Transposition ------------------------- */
     {
-      id: 'transposition', group: 'Yer değiştirme sırası (Transposition)', name: 'Sütunlu Transpozisyon', short: 'Permütasyon şifresi', icon: 'T',
-      tag: 'Transposition · Permütasyon',
-      desc: 'Saf permütasyon şifresi: harfler <b>değişmez, sadece yerleri değişir</b>. Düz metin satır satır bir matrise yazılır, sütunlar anahtardaki sıraya göre okunur. Birden çok tur ile daha güvenli hale gelir.',
-      formula: ['Satırlara yaz → sütunları <em>anahtar sırasıyla</em> oku', 'Anahtar: 2 5 3 1 6 4 ya da bir kelime'],
-      security: ['Harf frekansları hiç değişmez — frekans grafiğinde girdi ve çıktı birebir aynıdır.', 'Bu yüzden düz metnin dili kolayca anlaşılır; tek turlu transpozisyon zayıftır.', 'Birden çok tur (multiple rounds) uygulamak güvenliği artırır.'],
-      keyspace: 'n sütun için <b>n!</b> anahtar',
+      id: 'transposition', group: 'trans', icon: 'T',
+      name: { tr: 'Transpozisyon Şifresi', en: 'Transposition Cipher' },
+      short: { tr: 'Sütunlu permütasyon', en: 'Columnar permutation' },
+      tag: { tr: 'Transpozisyon · Permütasyon', en: 'Transposition · Permutation' },
+      desc: {
+        tr: 'Saf permütasyon şifresi: harfler <b>değişmez, sadece yerleri değişir</b>. Düz metin satır satır bir matrise yazılır, sütunlar anahtardaki sıraya göre okunur. Birden çok tur ile daha güvenli hale gelir.',
+        en: 'A pure permutation cipher: letters <b>are not changed, only re-ordered</b>. The plaintext is written row by row into a matrix and the columns are read in key order. Multiple rounds make it more secure.',
+      },
+      formula: {
+        tr: ['Satırlara yaz → sütunları <em>anahtar sırasıyla</em> oku', 'Anahtar: 2 5 3 1 6 4 ya da bir kelime'],
+        en: ['Write in rows → read columns <em>in key order</em>', 'Key: 2 5 3 1 6 4 or a keyword'],
+      },
+      security: {
+        tr: ['Harf frekansları hiç değişmez; frekans grafiğinde girdi ve çıktı birebir aynıdır.', 'Bu yüzden düz metnin dili kolayca anlaşılır; tek turlu transpozisyon zayıftır.', 'Birden çok tur uygulamak güvenliği artırır.'],
+        en: ['Letter frequencies do not change at all; input and output are identical in the frequency chart.', 'The plaintext language is therefore easy to recognise; a single round is weak.', 'Applying multiple rounds increases security.'],
+      },
+      keyspace: { tr: 'n sütun için <b>n!</b> anahtar', en: '<b>n!</b> keys for n columns' },
       defaults: { key: '2 5 3 1 6 4', rounds: 1 },
       example: { text: 'meet me at midnight for the goodies', keys: { key: '2 5 3 1 6 4', rounds: 1 } },
       keysHTML: (k) => `
-        <div class="field" style="flex:3"><label>Anahtar (sayılar veya kelime)</label><input type="text" value="${esc(k.key)}" data-key="key" /><span class="hint">Ör: “2 5 3 1 6 4”, “4312567” veya “ZEBRAS”</span></div>
-        <div class="field narrow"><label>Tur sayısı</label><select data-key="rounds">${[1, 2, 3, 4, 5].map((n) => `<option ${+k.rounds === n ? 'selected' : ''}>${n}</option>`).join('')}</select><span class="hint">Eksikler X ile doldurulur</span></div>`,
+        <div class="field" style="flex:3"><label>${t('Anahtar (sayılar veya kelime)', 'Key (numbers or keyword)')}</label><input type="text" value="${esc(k.key)}" data-key="key" />
+          <span class="hint">${t('Ör: “2 5 3 1 6 4”, “4312567” veya “ZEBRAS”', 'e.g. “2 5 3 1 6 4”, “4312567” or “ZEBRAS”')}</span></div>
+        <div class="field narrow"><label>${t('Tur sayısı', 'Rounds')}</label><select data-key="rounds">${[1, 2, 3, 4, 5].map((n) => `<option ${+k.rounds === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
+          <span class="hint">${t('Eksikler X ile doldurulur', 'Padded with X')}</span></div>`,
       run(text, dec, k) {
         const r = C.transposition(trNorm(text), k.key, dec, k.rounds);
-        return { result: r.result, viz: vizTransposition(r, dec, k.rounds) };
+        return { result: r.result, viz: V.transposition({ r, dec, rounds: k.rounds, sel: state.sel }) };
       },
       freq: true,
     },
+
+    /* ------------------------------- XOR ------------------------------- */
     {
-      id: 'xor', group: 'Modern yaklaşım', name: 'Diferansiyel XOR', short: 'Blok zincirleme XOR', icon: '⊕',
-      tag: 'Blok şifre · XOR zincirleme',
-      desc: 'XOR’un özelliklerine dayanır. Metin 16 baytlık bloklara ayrılır; her blok anahtarla <b>ve bir önceki şifreli blokla</b> XOR’lanır. Böylece her çıktı bloğu öncekine bağlı olur ve tekrar eden kalıplar yok olur.',
-      formula: ['[A ⊕ B] ⊕ C = A ⊕ [B ⊕ C]', 'A ⊕ A = 0 &nbsp;·&nbsp; A ⊕ 0 = A', '<b>Cᵢ</b> = Pᵢ ⊕ <em>K</em> ⊕ Cᵢ₋₁ &nbsp;(C₀ = IV)'],
-      security: ['Diferansiyel XOR: her bloğun çıktısı bir önceki bloğa bağlıdır.', 'Tekrar eden kalıpları yok eder — aynı iki satırı yazıp şifreleyin, çıktıların farklı olduğunu görün.', 'Çıktı HEX biçimindedir; Türkçe karakterler dahil tüm UTF-8 metinler desteklenir.'],
-      keyspace: '16 baytlık blok anahtarı: <b>2¹²⁸</b>',
-      defaults: { key: 'kriptoloji', iv: 'Hopes and dreams of a million years' },
-      example: { text: 'Bu satır tekrar ediyor.Bu satır tekrar ediyor.Bu satır tekrar ediyor.', keys: { key: 'kriptoloji', iv: 'Hopes and dreams of a million years' } },
+      id: 'xor', group: 'modern', icon: '⊕',
+      name: { tr: 'XOR Şifresi', en: 'XOR Cipher' },
+      short: { tr: 'Basit ve zincirleme XOR', en: 'Simple & chained XOR' },
+      tag: { tr: 'Bit düzeyinde · XOR', en: 'Bitwise · XOR' },
+      desc: {
+        tr: 'XOR’un özelliklerine dayanır: aynı anahtarla iki kez XOR’lamak düz metni geri verir. <b>Basit</b> modda her bayt anahtarın baytıyla XOR’lanır. <b>Zincirleme (diferansiyel)</b> modda her 16 baytlık blok ayrıca bir önceki şifreli blokla XOR’lanır, böylece tekrar eden kalıplar yok olur.',
+        en: 'Based on the properties of XOR: XORing twice with the same key returns the plaintext. In <b>simple</b> mode every byte is XORed with a key byte. In <b>chained (differential)</b> mode every 16-byte block is also XORed with the previous ciphertext block, so repeating patterns disappear.',
+      },
+      formula: ['[A ⊕ B] ⊕ C = A ⊕ [B ⊕ C]', 'A ⊕ A = 0 · A ⊕ 0 = A', '<b>Cᵢ</b> = Pᵢ ⊕ <em>K</em> ⊕ Cᵢ₋₁ (C₀ = IV)'],
+      security: {
+        tr: ['Basit XOR’da aynı düz metin her zaman aynı şifreli metni verir; kısa anahtar tekrar ettiği için kırılabilir.', 'Diferansiyel XOR’da her bloğun çıktısı bir önceki bloğa bağlıdır; tekrar eden kalıplar yok olur.', 'Çıktı HEX biçimindedir; Türkçe karakterler dahil tüm UTF-8 metinler desteklenir.'],
+        en: ['With simple XOR the same plaintext always gives the same ciphertext; a short repeating key can be broken.', 'With differential XOR every output block depends on the previous one, destroying repetitive patterns.', 'The output is hexadecimal; any UTF-8 text (including Turkish characters) is supported.'],
+      },
+      keyspace: { tr: 'Zincirleme mod: 16 baytlık blok anahtarı, <b>2¹²⁸</b>', en: 'Chained mode: 16-byte block key, <b>2¹²⁸</b>' },
+      defaults: { mode: 'chained', key: 'cryptology', iv: 'Hopes and dreams of a million years' },
+      example: {
+        text: 'This line repeats.This line repeats.This line repeats.',
+        keys: { mode: 'chained', key: 'cryptology', iv: 'Hopes and dreams of a million years' },
+      },
       keysHTML: (k) => `
-        <div class="field"><label>Anahtar (passphrase)</label><input type="text" value="${esc(k.key)}" data-key="key" /></div>
-        <div class="field"><label>Başlangıç vektörü (IV)</label><input type="text" value="${esc(k.iv)}" data-key="iv" /></div>`,
+        <div class="field narrow" style="flex:0 0 240px"><label>${t('Mod', 'Mode')}</label>
+          <select data-key="mode">
+            <option value="simple" ${k.mode === 'simple' ? 'selected' : ''}>${t('Basit (tekrarlı anahtar)', 'Simple (repeating key)')}</option>
+            <option value="chained" ${k.mode === 'chained' ? 'selected' : ''}>${t('Zincirleme (diferansiyel)', 'Chained (differential)')}</option>
+          </select></div>
+        <div class="field"><label>${t('Anahtar', 'Key')}</label><input type="text" value="${esc(k.key)}" data-key="key" /></div>
+        ${k.mode === 'chained' ? `<div class="field"><label>${t('Başlangıç vektörü (IV)', 'Initialisation vector (IV)')}</label><input type="text" value="${esc(k.iv)}" data-key="iv" /></div>` : ''}`,
+      rerenderOn: ['mode'],
       run(text, dec, k) {
-        const r = C.diffXor(text, k.key, k.iv, dec, 16);
-        return { result: r.result, viz: vizXor(r, dec) };
+        if (k.mode === 'simple') {
+          const r = C.simpleXor(text, k.key, dec);
+          return { result: r.result, viz: V.xorSimple({ r, dec }) };
+        }
+        const r = C.diffXor(text, k.key, k.iv, dec);
+        return { result: r.result, viz: V.xorChained({ r, dec }) };
       },
       freq: false,
-      freqNote: 'XOR baytlar üzerinde çalışır, çıktı HEX’tir. Tekrar eden girdilerin bile çıktıda tekrar etmediğine bakın.',
+      freqNote: {
+        tr: 'XOR baytlar üzerinde çalışır ve çıktı HEX’tir. Zincirleme modda tekrar eden girdilerin bile çıktıda tekrar etmediğine bakın.',
+        en: 'XOR works on bytes and its output is hexadecimal. In chained mode, notice that even repeated input does not repeat in the output.',
+      },
     },
+
+    /* ------------------------------ Base64 ----------------------------- */
     {
-      id: 'base64', group: 'Modern yaklaşım', name: 'Base64 Kodlama', short: '“Swahili açısı”', icon: '64',
-      tag: 'Kodlama · Encoding',
-      desc: 'Ders notlarındaki “Swahili açısı”: düz metnin yapısı bilinmiyorsa basit bir dönüşüm bile zorlaşır. Base64 her seferinde <b>6 biti</b> yazdırılabilir bir karaktere çevirir (A–Z, a–z, 0–9, + , /). E-posta ekleri böyle taşınır.',
-      formula: ['3 bayt (24 bit) → 4 × <em>6 bit</em> → 4 karakter', 'Küme: A–Z a–z 0–9 + /'],
-      security: ['Base64 bir şifreleme DEĞİL, bir kodlamadır — anahtarı yoktur.', 'Amaç: yazdırılamayan karakterlerin internet iletişiminde bozulmasını önlemek.', '“Tüm internet iletişimi karakter tabanlıdır” sloganının pratik karşılığı.'],
-      keyspace: '<b>Anahtar yok</b> — sadece kodlama',
+      id: 'base64', group: 'modern', icon: '64',
+      name: { tr: 'Base64 Kodlama', en: 'Base64 Encoding' },
+      short: { tr: '6 bitlik gruplar', en: '6-bit groups' },
+      tag: { tr: 'Kodlama · Encoding', en: 'Encoding · Decoding' },
+      desc: {
+        tr: 'Ders notlarındaki “Swahili açısı”: düz metnin biçimi bilinmiyorsa basit bir dönüşüm bile onu gizler. Base64 her seferinde <b>6 biti</b> yazdırılabilir bir karaktere çevirir (A–Z, a–z, 0–9, +, /). E-posta ekleri bu şekilde taşınır.',
+        en: 'The “Swahili angle” from the lecture: if the format of the plaintext is unknown, even a simple transformation hides it. Base64 encodes <b>6 bits</b> at a time into a printable character (A–Z, a–z, 0–9, +, /). E-mail attachments are sent this way.',
+      },
+      formula: { tr: ['3 bayt (24 bit) → 4 × <em>6 bit</em> → 4 karakter', 'Küme: A–Z a–z 0–9 + /'], en: ['3 bytes (24 bits) → 4 × <em>6 bits</em> → 4 characters', 'Set: A–Z a–z 0–9 + /'] },
+      security: {
+        tr: ['Base64 bir şifreleme değil, bir kodlamadır; anahtarı yoktur.', 'Amaç, yazdırılamayan karakterlerin internet iletişiminde bozulmasını önlemektir.', '“Tüm internet iletişimi karakter tabanlıdır” sloganının pratik karşılığıdır.'],
+        en: ['Base64 is an encoding, not encryption — there is no key.', 'Its purpose is to keep non-printable bytes from being corrupted in transit.', 'It is the practical side of the slogan “all internet communications are character based”.'],
+      },
+      keyspace: { tr: '<b>Anahtar yok</b>, yalnızca kodlama', en: '<b>No key</b> — encoding only' },
       defaults: {},
-      example: { text: 'Merhaba Dünya! Şifreleme çok eğlenceli.', keys: {} },
-      keysHTML: () => `<div class="field"><span class="hint" style="font-size:13px">Bu teknik anahtar kullanmaz. UTF-8 (Türkçe karakterler) desteklenir.</span></div>`,
+      example: { text: 'Hello World! Merhaba Dünya!', keys: {} },
+      keysHTML: () => `<div class="field"><span class="hint" style="font-size:13px">${t('Bu teknik anahtar kullanmaz. UTF-8 (Türkçe karakterler) desteklenir.', 'This technique uses no key. UTF-8 text (including Turkish letters) is supported.')}</span></div>`,
       run(text, dec) {
-        const r = C.base64(text, dec);
-        return { result: r, viz: vizBase64(dec ? r : text) };
+        const result = C.base64(text, dec);
+        return { result, viz: V.base64({ plain: dec ? result : text }) };
       },
       freq: false,
-      freqNote: 'Base64 harf değil bit grupları üzerinde çalışır; frekans analizi burada anlamlı değil.',
+      freqNote: { tr: 'Base64 harfler değil bit grupları üzerinde çalışır; frekans analizi burada anlamlı değildir.', en: 'Base64 works on bit groups rather than letters, so frequency analysis is not meaningful here.' },
     },
   ];
-  const byId = Object.fromEntries(TECHS.map((t) => [t.id, t]));
-  TECHS.forEach((t) => (state.keys[t.id] = JSON.parse(JSON.stringify(t.defaults))));
 
-  /* ---------------- Görselleştirmeler ---------------- */
-  function vizCaesar(text, k, dec) {
-    k = +k;
-    const used = new Set(C.onlyLetters(trNorm(text)));
-    const step = 360 / 26, R1 = 100, R2 = 72, c = 115;
-    const ring = (r, cls, rot) => `<g class="${cls}" style="transform:rotate(${rot}deg)">${A.split('').map((ch, i) => {
-      const a = (i * step - 90) * Math.PI / 180;
-      return `<text x="${c + r * Math.cos(a)}" y="${c + r * Math.sin(a)}" transform="rotate(${i * step} ${c + r * Math.cos(a)} ${c + r * Math.sin(a)})">${ch}</text>`;
-    }).join('')}</g>`;
-    const map = A.split('').map((ch, i) => {
-      const from = dec ? A[(i + k) % 26] : ch;
-      const to = dec ? ch : A[(i + k) % 26];
-      return `<div class="cell ${used.has(from) ? 'hit' : ''}"><span class="p">${from}</span><span class="arrow">▼</span><span class="c">${to}</span></div>`;
-    }).join('');
-    let brute = '';
-    const sample = (C.onlyLetters(trNorm(text)).slice(0, 26)) || '';
-    if (sample) {
-      const base = dec ? sample : C.caesar(sample, k);
-      brute = `<div class="sub-title">Kaba kuvvet saldırısı · şifreli metne tüm anahtarları dene</div><div class="brute">${
-        Array.from({ length: 25 }, (_, i) => i + 1).map((s) => `<div class="${s === k ? 'me' : ''}"><b>k=${String(s).padStart(2, '0')}</b>${esc(C.caesar(base, s, true).toLowerCase())}</div>`).join('')}</div>`;
-    }
-    return `<div class="wheel-wrap">
-        <svg class="wheel" viewBox="0 0 230 230">
-          <circle cx="115" cy="115" r="112" style="fill:var(--surface);stroke:var(--line-strong)"/>
-          <circle cx="115" cy="115" r="86" style="fill:var(--accent-soft);stroke:var(--accent-line)"/>
-          <circle cx="115" cy="115" r="56" style="fill:var(--surface);stroke:var(--line-strong)"/>
-          ${ring(R1, 'outer', 0)}${ring(R2, 'inner', -k * step)}
-          <text x="115" y="108" style="font-size:11px;fill:var(--muted)">kaydırma</text>
-          <text x="115" y="128" style="font-size:22px;font-weight:600;fill:var(--accent)">${k}</text>
-        </svg>
-        <div style="flex:1;min-width:260px;color:var(--ink2);font-size:14px;line-height:1.6">
-          Dış halka <b>düz metin</b>, iç halka <b style="color:var(--accent)">şifreli</b> alfabedir. İç halka <b>${k}</b> adım döndürülmüştür.
-          ${dec ? 'Çözmede şifreli harften <b>k</b> adım geri gidilir.' : 'Örneğin <b>A → ' + A[k] + '</b>, <b>Z → ' + A[(25 + k) % 26] + '</b>.'}
-          <br><span style="color:var(--muted);font-size:12.5px">Metninizde geçen harfler aşağıda vurgulanır.</span>
-        </div>
-      </div>
-      <div class="alpha-map">${map}</div>${brute}`;
+  const byId = Object.fromEntries(TECHS.map((x) => [x.id, x]));
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  TECHS.forEach((x) => (state.keys[x.id] = clone(x.defaults)));
+
+  /** Status label for the Hill key matrix. */
+  function hillStatusHTML(M) {
+    const d = C.mod(C.det(M), 26);
+    const ok = C.gcd(d, 26) === 1;
+    return `<span class="key-status ${ok ? 'ok' : 'bad'}">det(K) mod 26 = ${d} → ${ok ? '✓ ' + t('tersi var', 'invertible') : '✗ ' + t('tersi yok (gcd ≠ 1)', 'not invertible (gcd ≠ 1)')}</span>`;
   }
 
-  function vizMono(text, key, dec) {
-    const used = new Set(C.onlyLetters(trNorm(text)));
-    const map = A.split('').map((ch, i) => {
-      const from = dec ? key[i] : ch;
-      const to = dec ? ch : key[i];
-      return `<div class="cell ${used.has(from) ? 'hit' : ''}"><span class="p">${from}</span><span class="arrow">▼</span><span class="c">${to}</span></div>`;
-    }).join('');
-    return `<p style="color:var(--ink2);margin-top:0">Her harf, anahtar alfabedeki karşılığıyla değiştirilir. Vurgulu sütunlar metninizde kullanılan harflerdir.</p><div class="alpha-map">${map}</div>`;
-  }
+  /* =============================================================
+   *  2. RENDERING
+   * =========================================================== */
 
-  function vizPlayfair(r, dec) {
-    if (!r.steps.length) return '<div class="viz-empty">Matris hazır — ikilileri görmek için metin yazın.</div>';
-    const sel = Math.min(state.sel, r.steps.length - 1);
-    const st = r.steps[sel];
-    const a = st.in[0], b = st.out;
-    const keyLetters = new Set();
-    // anahtar harfleri: matriste alfabetik sıraya girmeden önceki harfler
-    const flat = r.matrix.flat();
-    let prev = '';
-    for (const ch of flat) { if (prev && ch < prev) break; prev = ch; }
-    const kw = C.onlyLetters(state.keys.playfair.key).replace(/J/g, 'I');
-    for (const ch of kw) keyLetters.add(ch);
-    const grid = flat.map((ch) => {
-      let cls = keyLetters.has(ch) ? 'key' : '';
-      if (st.in.includes(ch)) cls = 'a';
-      if (st.out.includes(ch)) cls = 'b';
-      return `<div class="${cls}">${ch === 'I' ? 'I/J' : ch}</div>`;
-    }).join('');
-    const ruleText = {
-      row: 'Harfler <b>aynı satırda</b> → her biri ' + (dec ? 'solundaki' : 'sağındaki') + ' harfle değiştirilir (dairesel).',
-      col: 'Harfler <b>aynı sütunda</b> → her biri ' + (dec ? 'üstündeki' : 'altındaki') + ' harfle değiştirilir (dairesel).',
-      rect: 'Harfler <b>farklı satır ve sütunda</b> → dikdörtgenin köşeleri: her harf kendi satırında, diğer harfin sütunundaki harfle değiştirilir.',
-    }[st.rule];
-    const ruleShort = { row: 'satır', col: 'sütun', rect: 'dikdörtgen' };
-    void a; void b;
-    return `<div class="pf-wrap">
-      <div><div class="pf-grid">${grid}</div><div class="mat-label" style="margin-top:8px">5 × 5 anahtar matrisi</div></div>
-      <div style="flex:1;min-width:260px">
-        <div class="pairs">${r.steps.slice(0, 60).map((s, i) => `<span class="pair ${i === sel ? 'sel' : ''}" data-sel="${i}">${s.in} → <span class="to">${s.out}</span><span class="r">${ruleShort[s.rule]}</span></span>`).join('')}${r.steps.length > 60 ? '<span class="pair">…</span>' : ''}</div>
-        <div class="rule-box"><b style="color:var(--ink)">${st.in}</b> → <b style="color:var(--accent)">${st.out}</b> · ${ruleText}<br><span style="color:var(--muted);font-size:12.5px">Bir ikiliye tıklayarak matriste görün. ${dec ? '' : 'Tekrar eden harflerin arasına ve tek kalan son harfe dolgu harfi eklenir.'}</span></div>
-      </div></div>`;
-  }
-
-  function matHTML(M, cls) {
-    const n = M[0].length;
-    return `<div class="mat ${cls}" style="grid-template-columns:repeat(${n},auto)">${M.map((r) => r.map((v) => `<span>${v}</span>`).join('')).join('')}</div>`;
-  }
-  function vizHill(r, K, dec) {
-    const inv = r.inverse;
-    const head = `<div class="mat-row" style="margin-bottom:14px">
-        <div>${matHTML(K, 'k')}<div class="mat-label">K</div></div>
-        <span class="op">→</span>
-        <div>${inv ? matHTML(inv, 'k') : '<span style="color:var(--bad)">yok</span>'}<div class="mat-label">K⁻¹ mod 26</div></div>
-        <span style="color:var(--muted);font-size:13px">det(K) mod 26 = <b style="color:var(--accent)">${r.det}</b></span>
-      </div>`;
-    if (!r.blocks.length) return head + '<div class="viz-empty">Blokları görmek için metin yazın.</div>';
-    const sel = Math.min(state.sel, r.blocks.length - 1);
-    const b = r.blocks[sel];
-    const col = (v) => v.map((x) => [x]);
-    const body = `<div class="mat-row">
-        <div>${matHTML(r.used, 'k')}<div class="mat-label">${dec ? 'K⁻¹' : 'K'}</div></div><span class="op">×</span>
-        <div>${matHTML(col(b.vin), 'p')}<div class="mat-label">${b.in}</div></div><span class="op">mod 26 =</span>
-        <div>${matHTML(col(b.vout), 'c')}<div class="mat-label" style="color:var(--accent)">${b.out}</div></div>
-      </div>
-      <div class="blocks">${r.blocks.slice(0, 60).map((x, i) => `<span class="blk ${i === sel ? 'sel' : ''}" data-sel="${i}">${x.in} → <b>${x.out}</b></span>`).join('')}</div>`;
-    return head + body;
-  }
-
-  function vizVigenere(align) {
-    if (!align.length) return '<div class="viz-empty">Hizalamayı görmek için metin yazın.</div>';
-    const a = align.slice(0, 40);
-    const row = (cls, lab, f) => `<div class="vig-row ${cls}"><span class="lab">${lab}</span>${a.map((x) => `<span class="ch">${f(x)}</span>`).join('')}</div>`;
-    return `<div class="vig-table">
-      ${row('', 'Girdi', (x) => x.p)}
-      ${row('k', 'Anahtar', (x) => x.k)}
-      ${row('s', 'Kaydırma', (x) => '+' + (x.k.charCodeAt(0) - 65))}
-      ${row('c', 'Çıktı', (x) => x.c)}
-    </div>${align.length > 40 ? '<div class="viz-empty" style="margin-top:6px">… ilk 40 harf gösteriliyor</div>' : ''}
-    <p style="color:var(--muted);font-size:13px;margin-bottom:0">Aynı düz metin harfinin farklı yerlerde farklı şifreli harflere dönüştüğüne dikkat edin — polialfabetik şifrenin gücü budur.</p>`;
-  }
-
-  function vizTransposition(r, dec, rounds) {
-    if (!r.grid || !r.grid.length) return '<div class="viz-empty">Matrisi görmek için metin yazın.</div>';
-    const n = r.order.length;
-    const sel = Math.min(state.sel, n - 1);
-    const hiCol = r.readSeq[sel];
-    const rows = r.grid.slice(0, 14);
-    const head = r.order.map((o, c) => `<div class="h">${o}<small>s${c + 1}</small></div>`).join('');
-    const cells = rows.map((row) => row.map((ch, c) => `<div class="${c === hiCol ? 'col-hi' : ''}">${ch}</div>`).join('')).join('');
-    const reads = r.readSeq.map((c, i) => `<span class="blk ${i === sel ? 'sel' : ''}" data-sel="${i}"><b>${i + 1}.</b>sütun ${c + 1}: ${r.grid.map((row) => row[c]).join('')}</span>`).join('');
-    return `<p style="color:var(--ink2);margin-top:0">${dec ? 'Şifreli metin sütunlara anahtar sırasıyla yazıldı, satır satır okunarak düz metin elde edilir.' : 'Düz metin satır satır yazıldı; sütunlar başlıktaki numara sırasıyla okunur.'}${+rounds > 1 ? ` <b style="color:var(--accent)">(${rounds} turun son turu gösteriliyor)</b>` : ''}</p>
-      <div class="tp-grid" style="grid-template-columns:repeat(${n},40px)">${head}${cells}</div>
-      ${r.grid.length > 14 ? '<div class="viz-empty">… ilk 14 satır</div>' : ''}
-      <div class="blocks">${reads}</div>`;
-  }
-
-  function vizXor(r, dec) {
-    const sp = (h) => h.match(/.{1,2}/g).join(' ');
-    const blocks = r.blocks.slice(0, 4).map((b, i) => `<div class="xor-block"><h4>Blok ${i + 1}</h4>
-      <div class="hexrow"><span class="l">${dec ? 'Şifreli' : 'Düz'} (P${i + 1})</span><span class="v">${sp(b.in)}</span></div>
-      <div class="hexrow"><span class="l">⊕ Anahtar</span><span class="v" style="color:var(--key)">${sp(r.key)}</span></div>
-      <div class="hexrow"><span class="l">⊕ ${i === 0 ? 'IV' : 'Önceki C' + i}</span><span class="v" style="color:var(--accent)">${sp(b.prev)}</span></div>
-      <div class="hexrow res"><span class="l">= ${dec ? 'Düz' : 'Şifreli'}</span><span class="v">${sp(b.out)}</span></div></div>`).join('');
-    return `<p style="color:var(--ink2);margin-top:0">Anahtar ve IV, 16 baytlık bloklara katlanarak (XOR ile) üretilir. Son bloğa PKCS#7 dolgusu eklenir.</p>${blocks}${r.blocks.length > 4 ? `<div class="viz-empty">… toplam ${r.blocks.length} blok</div>` : ''}`;
-  }
-
-  function vizBase64(plain) {
-    const bytes = Array.from(new TextEncoder().encode(plain)).slice(0, 18);
-    if (!bytes.length) return '<div class="viz-empty">Bit gruplarını görmek için metin yazın.</div>';
-    const T = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let html = '';
-    for (let i = 0; i < bytes.length; i += 3) {
-      const g = bytes.slice(i, i + 3);
-      const bits = g.map((b) => b.toString(2).padStart(8, '0')).join('');
-      const padded = bits.padEnd(Math.ceil(bits.length / 6) * 6, '0');
-      const sext = padded.match(/.{6}/g);
-      const chars = sext.map((s) => `<span><b>${T[parseInt(s, 2)]}</b>${s}</span>`);
-      while (chars.length < 4) chars.push('<span><b>=</b>dolgu</span>');
-      html += `<div class="b64-group"><div class="bytes">${g.map((b) => b.toString(2).padStart(8, '0')).join(' ')}</div><div class="sext">${chars.join('')}</div></div>`;
-    }
-    return `<p style="color:var(--ink2);margin-top:0">Her 3 bayt (24 bit), 6 bitlik 4 gruba bölünür; her grup tablodan bir karaktere dönüşür.</p><div class="b64-bits">${html}</div>`;
-  }
-
-  /* ---------------- Frekans grafiği ---------------- */
-  function freqOf(s) {
-    const L = C.onlyLetters(trNorm(s));
-    const f = new Array(26).fill(0);
-    for (const ch of L) f[ch.charCodeAt(0) - 65]++;
-    return L.length ? f.map((x) => x / L.length) : f;
-  }
-  function renderFreq(inp, out, tech) {
-    const el = $('#freqChart');
-    if (!tech.freq) {
-      el.style.display = 'block';
-      el.style.height = 'auto';
-      el.innerHTML = `<p class="freq-note">${tech.freqNote}</p>`;
-      return;
-    }
-    el.style.display = '';
-    el.style.height = '';
-    const fi = freqOf(inp), fo = freqOf(out);
-    const max = Math.max(0.0001, ...fi, ...fo);
-    if (!el.querySelector('.col')) {
-      el.innerHTML = A.split('').map((ch) => `<div class="col"><div class="bars"><div class="bar in"></div><div class="bar out"></div></div><span class="lab">${ch}</span></div>`).join('');
-    }
-    el.querySelectorAll('.col').forEach((c, i) => {
-      c.querySelector('.in').style.height = (fi[i] / max) * 100 + '%';
-      c.querySelector('.out').style.height = (fo[i] / max) * 100 + '%';
-      c.title = `${A[i]} · girdi %${(fi[i] * 100).toFixed(1)} · çıktı %${(fo[i] * 100).toFixed(1)}`;
+  /** Left navigation, grouped by cipher family. */
+  function renderSidebar() {
+    let html = '', g = '';
+    TECHS.forEach((x, i) => {
+      if (x.group !== g) { g = x.group; html += `<div class="group">${I.pick(GROUPS[g])}</div>`; }
+      html += `<button class="tech ${x.id === state.tech ? 'active' : ''}" data-tech="${x.id}">
+        <span class="ico">${x.icon}</span>
+        <span><b>${I.pick(x.name)}</b><small>${String(i + 1).padStart(2, '0')} · ${I.pick(x.short)}</small></span></button>`;
     });
+    $('#techList').innerHTML = html;
+    $('#techList').setAttribute('aria-label', I.ui('navLabel'));
   }
 
-  /* ---------------- Çıktı animasyonu ---------------- */
+  /** Header (name, description, formulas) and security notes of the selected cipher. */
+  function renderTech(animate = true) {
+    const x = byId[state.tech];
+    const i = TECHS.indexOf(x);
+    $('#techTag').textContent = I.pick(x.tag);
+    $('#techNum').textContent = `${String(i + 1).padStart(2, '0')} / ${String(TECHS.length).padStart(2, '0')}`;
+    $('#techName').textContent = I.pick(x.name);
+    $('#techDesc').innerHTML = I.pick(x.desc);
+    const formula = Array.isArray(x.formula) ? x.formula : I.pick(x.formula);
+    $('#techFormula').innerHTML = formula.map((f) => `<code>${f}</code>`).join('');
+    $('#techSec').innerHTML = I.pick(x.security).map((s) => `<li>${s}</li>`).join('');
+    $('#keyspace').innerHTML = `${I.ui('keyspace')}: ${I.pick(x.keyspace)}`;
+    if (animate) {
+      const hero = $('#hero');
+      hero.classList.remove('anim-in'); void hero.offsetWidth; hero.classList.add('anim-in');
+    }
+    $('#freqChart').innerHTML = '';
+    renderKeys();
+  }
+
+  function renderKeys() {
+    const x = byId[state.tech];
+    $('#keyArea').innerHTML = x.keysHTML(state.keys[x.id]);
+  }
+
+  /** Short "scramble" animation when a new result appears. */
   let scrambleTimer = null;
-  function setOutput(text) {
+  function setOutput(text, animate) {
     const el = $('#output');
     clearInterval(scrambleTimer);
-    if (!text || text.length > 700) { el.textContent = text; return; }
-    const pool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&@*';
+    if (!animate || !text || text.length > 700) { el.textContent = text; return; }
+    const pool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let frame = 0;
-    const total = 10;
+    const total = 8;
     scrambleTimer = setInterval(() => {
       frame++;
       const reveal = Math.floor((frame / total) * text.length);
@@ -418,62 +412,64 @@
       for (let i = reveal; i < text.length; i++) s += /\s/.test(text[i]) ? text[i] : pool[(Math.random() * pool.length) | 0];
       el.textContent = s;
       if (frame >= total) { clearInterval(scrambleTimer); el.textContent = text; }
-    }, 28);
+    }, 25);
   }
 
-  /* ---------------- Ana akış ---------------- */
-  function renderSidebar() {
-    let html = '', g = '';
-    TECHS.forEach((t, i) => {
-      if (t.group !== g) { g = t.group; html += `<div class="group">${g}</div>`; }
-      html += `<button class="tech ${t.id === state.tech ? 'active' : ''}" data-tech="${t.id}"><span class="ico">${t.icon}</span><span><b>${t.name}</b><small>${String(i + 1).padStart(2, '0')} · ${t.short}</small></span></button>`;
+  /** Relative letter frequencies (A–Z) of a text. */
+  function letterFrequencies(s) {
+    const L = C.onlyLetters(trNorm(s));
+    const f = new Array(26).fill(0);
+    for (const ch of L) f[ch.charCodeAt(0) - 65]++;
+    return L.length ? f.map((v) => v / L.length) : f;
+  }
+
+  /** Input-vs-output frequency bar chart. */
+  function renderFreq(input, output, x) {
+    const el = $('#freqChart');
+    if (!x.freq) {
+      el.classList.add('note');
+      el.innerHTML = `<p class="freq-note">${I.pick(x.freqNote)}</p>`;
+      return;
+    }
+    el.classList.remove('note');
+    const fi = letterFrequencies(input), fo = letterFrequencies(output);
+    const max = Math.max(0.0001, ...fi, ...fo);
+    if (!el.querySelector('.col')) {
+      el.innerHTML = A.split('').map((ch) => `<div class="col"><div class="bars"><div class="bar in"></div><div class="bar out"></div></div><span class="lab">${ch}</span></div>`).join('');
+    }
+    el.querySelectorAll('.col').forEach((col, i) => {
+      col.querySelector('.in').style.height = (fi[i] / max) * 100 + '%';
+      col.querySelector('.out').style.height = (fo[i] / max) * 100 + '%';
+      col.title = `${A[i]} · ${I.ui('input')} ${(fi[i] * 100).toFixed(1)}% · ${I.ui('output')} ${(fo[i] * 100).toFixed(1)}%`;
     });
-    $('#techList').innerHTML = html;
   }
 
-  function renderTech() {
-    const t = byId[state.tech];
-    const i = TECHS.indexOf(t);
-    $('#techTag').textContent = t.tag;
-    $('#techNum').textContent = String(i + 1).padStart(2, '0');
-    $('#techName').textContent = t.name;
-    $('#techDesc').innerHTML = t.desc;
-    $('#techFormula').innerHTML = t.formula.map((f) => `<code>${f}</code>`).join('');
-    $('#techSec').innerHTML = t.security.map((s) => `<li>${s}</li>`).join('');
-    $('#keyspace').innerHTML = 'Anahtar uzayı: ' + t.keyspace;
-    const hero = $('#hero');
-    hero.classList.remove('anim-in'); void hero.offsetWidth; hero.classList.add('anim-in');
-    $('#freqChart').innerHTML = '';
-    renderKeys();
-  }
-
-  function renderKeys() {
-    const t = byId[state.tech];
-    $('#keyArea').innerHTML = t.keysHTML(state.keys[t.id]);
-  }
-
+  /** Runs the selected cipher on the input and refreshes every output panel. */
   function update(animate = true) {
-    const t = byId[state.tech];
+    const x = byId[state.tech];
     const dec = state.mode === 'dec';
     const text = $('#input').value;
-    $('#inLabel').textContent = dec ? 'Şifreli metin (Ciphertext)' : 'Düz metin (Plaintext)';
-    $('#outLabel').textContent = dec ? 'Çözülmüş metin (Plaintext)' : 'Şifreli metin (Ciphertext)';
-    $('#inCount').textContent = text.length + ' karakter';
+
+    const isB64 = x.id === 'base64';
+    $('#inLabel').textContent = I.ui(dec ? (isB64 ? 'encoded' : 'ciphertext') : 'plaintext');
+    $('#outLabel').textContent = I.ui(dec ? 'decrypted' : (isB64 ? 'encoded' : 'ciphertext'));
+    $('#inCount').textContent = `${text.length} ${I.ui('chars')}`;
+
     const err = $('#error');
     try {
-      const r = t.run(text, dec, state.keys[t.id]);
+      const r = x.run(text, dec, state.keys[x.id]);
       err.hidden = true;
-      if (animate) setOutput(r.result); else $('#output').textContent = r.result;
-      $('#outCount').textContent = r.result.length + ' karakter';
+      setOutput(r.result, animate);
+      $('#outCount').textContent = `${r.result.length} ${I.ui('chars')}`;
       $('#viz').innerHTML = r.viz;
-      renderFreq(text, r.result, t);
+      renderFreq(text, r.result, x);
     } catch (e) {
       err.hidden = false;
       err.textContent = e.message;
-      $('#output').textContent = '';
-      $('#outCount').textContent = '0 karakter';
-      $('#viz').innerHTML = '<div class="viz-empty">Geçerli bir anahtar ve girdi bekleniyor.</div>';
-      renderFreq(text, '', t);
+      setOutput('', false);
+      $('#outCount').textContent = `0 ${I.ui('chars')}`;
+      $('#viz').innerHTML = `<div class="viz-empty">${I.ui('waiting')}</div>`;
+      renderFreq(text, '', x);
     }
   }
 
@@ -485,15 +481,39 @@
     update();
   }
 
+  function setLang(l) {
+    I.lang = l;
+    C.setLang(l);
+    try { localStorage.setItem('kriptolab-lang', l); } catch (_) { /* storage unavailable */ }
+    document.querySelectorAll('.lang-btn').forEach((b) => b.classList.toggle('active', b.dataset.lang === l));
+    I.apply();
+    renderSidebar();
+    renderTech(false);
+    update(false);
+  }
+
   function toast(msg) {
     const el = $('#toast');
     el.textContent = msg;
     el.classList.add('show');
-    clearTimeout(toast.t);
-    toast.t = setTimeout(() => el.classList.remove('show'), 1600);
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => el.classList.remove('show'), 1600);
   }
 
-  /* ---------------- Olaylar ---------------- */
+  /** Loads the lecture example for the current cipher. */
+  function loadExample(withToast = true) {
+    const x = byId[state.tech];
+    state.keys[x.id] = Object.assign(clone(x.defaults), clone(x.example.keys));
+    $('#input').value = x.example.text;
+    state.sel = 0;
+    renderKeys();
+    setMode('enc');
+    if (withToast) toast(I.ui('toastExample'));
+  }
+
+  /* =============================================================
+   *  3. EVENTS
+   * =========================================================== */
   $('#techList').addEventListener('click', (e) => {
     const b = e.target.closest('[data-tech]');
     if (!b) return;
@@ -506,50 +526,54 @@
   });
 
   document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.querySelectorAll('.lang-btn').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.lang)));
 
   $('#input').addEventListener('input', () => { state.sel = 0; update(); });
 
   const keyArea = $('#keyArea');
   keyArea.addEventListener('input', (e) => {
-    const t = byId[state.tech];
-    const k = state.keys[t.id];
+    const x = byId[state.tech];
+    const k = state.keys[x.id];
     const el = e.target;
+
+    // Hill matrix cell
     if (el.dataset.cell) {
       const [i, j] = el.dataset.cell.split(',').map(Number);
       k.M[i][j] = C.mod(parseInt(el.value, 10) || 0, 26);
-      // sadece durum etiketini güncelle (odak kaybolmasın)
-      const d = C.mod(C.det(k.M), 26), ok = C.gcd(d, 26) === 1;
-      const st = keyArea.querySelector('.key-status');
-      st.className = 'key-status ' + (ok ? 'ok' : 'bad');
-      st.textContent = `det(K) mod 26 = ${d} → ${ok ? '✓ tersi var' : '✗ tersi yok (gcd ≠ 1)'}`;
+      keyArea.querySelector('.key-status').outerHTML = hillStatusHTML(k.M);
       update(false);
       return;
     }
+
     const name = el.dataset.key;
     if (!name) return;
-    let val = el.type === 'range' ? +el.value : el.value;
-    if (t.onKey) t.onKey(name, val, k);
-    if (!(t.onKey && (name === 'word' || name === 'key') && t.id === 'mono')) k[name] = (name === 'rounds' || name === 'n') ? +val : val;
-    if (t.id === 'mono') {
-      if (name === 'word') k.word = val;
-      const pos = el.selectionStart;
+    const val = el.type === 'range' ? +el.value : el.value;
+
+    // Cipher-specific handling first, otherwise store the raw value
+    const handled = x.onKey ? x.onKey(name, val, k) : false;
+    if (!handled) k[name] = name === 'rounds' ? +val : val;
+
+    // Some inputs change the layout of the key panel → re-render and keep the caret
+    if (x.rerenderOn && x.rerenderOn.includes(name)) {
+      const caret = el.selectionStart;
       renderKeys();
       const again = keyArea.querySelector(`[data-key="${name}"]`);
-      if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (_) {} }
+      if (again && again.tagName === 'INPUT') { again.focus(); try { again.setSelectionRange(caret, caret); } catch (_) { /* not a text input */ } }
     }
-    if (t.id === 'hill' && name === 'n') renderKeys();
-    if (t.id === 'caesar') $('#shiftVal').textContent = val;
-    update(t.id !== 'caesar');
+    if (x.id === 'caesar') $('#shiftVal').textContent = val;
+    update(x.id !== 'caesar');
   });
+
   keyArea.addEventListener('click', (e) => {
     const b = e.target.closest('[data-action]');
     if (!b) return;
-    const t = byId[state.tech];
-    t.action(b.dataset.action, state.keys[t.id]);
+    const x = byId[state.tech];
+    x.action(b.dataset.action, state.keys[x.id]);
     renderKeys();
     update();
   });
 
+  // Clicking a pair / block / column in the visualisation selects it
   $('#viz').addEventListener('click', (e) => {
     const s = e.target.closest('[data-sel]');
     if (!s) return;
@@ -557,47 +581,49 @@
     update(false);
   });
 
+  // Swap: the output becomes the new input and the mode is reversed
   $('#swapBtn').addEventListener('click', () => {
-    const out = $('#output').textContent;
-    if (!out) return;
+    const x = byId[state.tech];
+    let result;
+    try { result = x.run($('#input').value, state.mode === 'dec', state.keys[x.id]).result; } catch (_) { return; }
+    if (!result) return;
     clearInterval(scrambleTimer);
-    const t = byId[state.tech];
-    $('#input').value = t.run($('#input').value, state.mode === 'dec', state.keys[t.id]).result;
+    $('#input').value = result;
     setMode(state.mode === 'enc' ? 'dec' : 'enc');
-    toast(state.mode === 'dec' ? 'Şimdi şifreli metni çözüyorsunuz' : 'Şimdi düz metni şifreliyorsunuz');
+    toast(I.ui(state.mode === 'dec' ? 'toastNowDec' : 'toastNowEnc'));
   });
 
   $('#copyBtn').addEventListener('click', async () => {
-    const t = byId[state.tech];
-    let txt;
-    try { txt = t.run($('#input').value, state.mode === 'dec', state.keys[t.id]).result; } catch (_) { txt = ''; }
+    const x = byId[state.tech];
+    let txt = '';
+    try { txt = x.run($('#input').value, state.mode === 'dec', state.keys[x.id]).result; } catch (_) { /* invalid key */ }
     if (!txt) return;
-    try { await navigator.clipboard.writeText(txt); }
-    catch (_) {
-      const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); } catch (__) {} ta.remove();
+    try { await navigator.clipboard.writeText(txt); } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (__) { /* ignore */ }
+      ta.remove();
     }
-    toast('Panoya kopyalandı');
+    toast(I.ui('toastCopied'));
   });
 
   $('#clearBtn').addEventListener('click', () => { $('#input').value = ''; update(); $('#input').focus(); });
-
-  function loadExample(withToast = true) {
-    const t = byId[state.tech];
-    state.keys[t.id] = Object.assign(JSON.parse(JSON.stringify(t.defaults)), JSON.parse(JSON.stringify(t.example.keys)));
-    $('#input').value = t.example.text;
-    state.mode = 'enc';
-    document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === 'enc'));
-    $('.mode').classList.remove('dec');
-    state.sel = 0;
-    renderKeys();
-    update();
-    if (withToast) toast('Ders örneği yüklendi');
-  }
   $('#exampleBtn').addEventListener('click', () => loadExample());
 
-  /* ---------------- Başlat ---------------- */
+  /* =============================================================
+   *  START
+   * =========================================================== */
+  let lang = 'en';
+  try { lang = localStorage.getItem('kriptolab-lang') || 'en'; } catch (_) { /* storage unavailable */ }
+  const params = new URLSearchParams(location.search);
+  if (params.get('lang')) lang = params.get('lang');
+  if (params.get('cipher') && byId[params.get('cipher')]) state.tech = params.get('cipher');
+
+  I.lang = lang;
+  C.setLang(lang);
+  document.querySelectorAll('.lang-btn').forEach((b) => b.classList.toggle('active', b.dataset.lang === lang));
+  I.apply();
   renderSidebar();
-  renderTech();
+  renderTech(false);
   loadExample(false);
 })();
